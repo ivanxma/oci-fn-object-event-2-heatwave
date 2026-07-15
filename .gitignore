@@ -1,0 +1,5 @@
+env.sh
+function-report.html
+employees.csv
+__pycache__/
+*.py[cod]
