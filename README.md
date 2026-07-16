@@ -1,14 +1,50 @@
 # Object Storage → HeatWave OCI Function
 
-This package deploys a Python 3.13 OCI Function into `HWDemo`, with a private subnet selected from `vcn_ivanma_london`. An Events rule forwards Object Storage create, delete, and update events to the function. The function creates `fndb.object_event` if it does not already exist, then writes each received event's timestamp, type, full JSON message, and extracted `bucket_name`, `compartment_name`, `resource_name`, `namespace`, and `event_time` columns. The host bootstrap uses the Oracle Linux `python3` package only for tooling; Python 3.13 is supplied by the function container image.
+This package deploys a Python 3.13 OCI Function into the compartment and private subnet selected in `env.sh`. An Events rule forwards Object Storage create, delete, and update events to the function. The function creates `fndb.object_event` if it does not already exist, then writes each received event's timestamp, type, full JSON message, and extracted `bucket_name`, `compartment_name`, `resource_name`, `namespace`, and `event_time` columns. The host bootstrap uses the Oracle Linux `python3` package only for tooling; Python 3.13 is supplied by the function container image.
 
 ## One-time prerequisites
 
-The OCI Compute instance principal must be permitted to inspect VCNs/subnets and manage Functions/Events in `HWDemo`. The deploying OCI user also needs an OCIR auth token and permission to push to the selected repository. The function subnet's security lists/NSGs and routing must permit egress to the configured HeatWave endpoint.
+Set `COMPARTMENT_ID` to the target deployment compartment. The Object Storage bucket, Function application, OCIR repository, and Events rule must be in that same compartment. The OCI Compute instance principal must be permitted to inspect VCNs/subnets and manage Functions/Events there. The deploying OCI user also needs an OCIR auth token and permission to push to the selected repository. The function subnet's security lists/NSGs and routing must permit egress to the configured HeatWave endpoint.
 
-The deployment creates the private `hw-demo-functions/object-storage-heatwave` OCIR repository explicitly in `HWDemo`, so the instance dynamic group also needs `manage repos in compartment HWDemo`. If a prior deployment auto-created that repository in the tenancy root compartment, move it to `HWDemo` before retrying; do not leave duplicate repositories.
+The deployment creates the private `${REPOSITORY_PREFIX}/${FUNCTION_NAME}` OCIR repository explicitly in `COMPARTMENT_ID`, so the instance dynamic group also needs repository-management permission in that compartment. If a prior deployment auto-created that repository in the tenancy root compartment, move it to the target compartment before retrying; do not leave duplicate repositories.
 
 If granting VCN read access is not possible, obtain the target private subnet OCID and export it as `SUBNET_ID`. The deployment script will then skip VCN/subnet discovery.
+
+## IAM dynamic group and policies
+
+The deployment scripts use the OCI Compute instance principal. Create a dynamic
+group that includes the Compute instance, replacing the placeholder with the
+compartment containing that instance:
+
+```text
+ALL { resource.type = 'instance', resource.compartment.id = '<compute-compartment-ocid>' }
+```
+
+An IAM administrator must create the following policies. Replace
+`<dynamic-group-name>` and `<deployment-compartment-name>`; every statement is
+scoped to the selected deployment compartment.
+
+```text
+Allow service faas to read repos in compartment <deployment-compartment-name>
+Allow dynamic-group <dynamic-group-name> to use virtual-network-family in compartment <deployment-compartment-name>
+Allow dynamic-group <dynamic-group-name> to manage functions-family in compartment <deployment-compartment-name>
+Allow dynamic-group <dynamic-group-name> to manage cloudevents-rules in compartment <deployment-compartment-name>
+Allow dynamic-group <dynamic-group-name> to manage repos in compartment <deployment-compartment-name>
+Allow dynamic-group <dynamic-group-name> to read objectstorage-namespaces in compartment <deployment-compartment-name>
+```
+
+For `showlog.sh`, add these read-only logging permissions. The second statement
+is needed only to discover Log Group and Log OCIDs through the CLI; the script
+itself needs `read log-content` after those OCIDs are in `env.sh`.
+
+```text
+Allow dynamic-group <dynamic-group-name> to read log-content in compartment <deployment-compartment-name>
+Allow dynamic-group <dynamic-group-name> to inspect log-groups in compartment <deployment-compartment-name>
+```
+
+IAM policy creation might require tenancy or parent-compartment permissions. An
+administrator can create the policy at the appropriate ancestor while retaining
+the compartment-only scope shown above.
 
 ## Deploy
 
@@ -22,9 +58,9 @@ chmod 600 env.sh
 ```
 
 `env.sh` is git-ignored and must never be committed. `OBJECT_STORAGE_COMPARTMENT_ID`
-must be the `HWDemo` compartment OCID (and may be omitted because the script
-defaults it to `HWDemo`). The Events rule itself is always created in `HWDemo`;
-the script refuses a cross-compartment source.
+must equal `COMPARTMENT_ID` (and may be omitted because the script defaults it
+to `COMPARTMENT_ID`). The Events rule is created in that same compartment; the
+script refuses a cross-compartment source.
 
 `deploy.sh` writes `function-report.html`. Open it locally or copy it off the host; it contains resource identifiers and no secrets.
 
@@ -41,9 +77,9 @@ of minutes and an optional result limit):
 
 The script searches only the configured application and function in the
 `COMPARTMENT_ID` from `env.sh`. Set `FUNCTION_LOG_GROUP_ID` and
-`FUNCTION_LOG_ID` from the enabled Function Invocation Log's details page. It
-uses the instance principal by default; set `OCI_AUTH` only when another OCI
-CLI authentication method is required.
+`FUNCTION_LOG_ID` from the enabled Function Invocation Log's details page in
+the same compartment. It uses the instance principal by default; set `OCI_AUTH`
+only when another OCI CLI authentication method is required.
 
 ## Test
 
