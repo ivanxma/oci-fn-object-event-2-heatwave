@@ -62,6 +62,11 @@ must equal `COMPARTMENT_ID` (and may be omitted because the script defaults it
 to `COMPARTMENT_ID`). The Events rule is created in that same compartment; the
 script refuses a cross-compartment source.
 
+`FUNCTION_NAME` in `env.sh` is the deployed OCI Function name. `deploy.sh`
+creates a temporary `func.yaml` with that name because Fn reads the name from
+YAML and does not expand shell variables in `func.yaml`. This lets the same
+checked-in source deploy under different function names without editing it.
+
 `deploy.sh` writes `function-report.html`. Open it locally or copy it off the host; it contains resource identifiers and no secrets.
 
 ## Show recent function logs

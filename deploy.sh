@@ -6,6 +6,7 @@ umask 077
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPORT="$ROOT_DIR/function-report.html"
+DEPLOY_DIR=$(mktemp -d)
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/env.sh}"
 if [[ ! -r "$ENV_FILE" ]]; then
   echo "Missing $ENV_FILE. Copy env.sh.example to env.sh and set local deployment values." >&2
@@ -30,6 +31,11 @@ SUBNET_ID="${SUBNET_ID:-}"
 : "${DB_PASSWORD:?Set DB_PASSWORD in env.sh}"
 : "${OCIR_USERNAME:?Set OCIR_USERNAME in env.sh}"
 : "${OCIR_AUTH_TOKEN:?Set OCIR_AUTH_TOKEN in env.sh}"
+cleanup() {
+  rm -f "${CONFIG_FILE:-}"
+  rm -rf "$DEPLOY_DIR"
+}
+trap cleanup EXIT
 # Object Storage and the Events rule are deliberately confined to the same
 # HWDemo compartment as the Function application.
 OBJECT_STORAGE_COMPARTMENT_ID="${OBJECT_STORAGE_COMPARTMENT_ID:-$COMPARTMENT_ID}"
@@ -91,12 +97,20 @@ fn update context api-url "https://functions.$REGION.oci.oraclecloud.com"
 fn update context registry "$REGION_KEY.ocir.io/$NAMESPACE/$REPOSITORY_PREFIX"
 printf '%s' "$OCIR_AUTH_TOKEN" | podman login "$REGION_KEY.ocir.io" --username "$OCIR_USERNAME" --password-stdin
 
-cd "$ROOT_DIR"
+# Fn reads the function name from func.yaml and does not expand shell variables
+# there. Build from a temporary definition whose name comes from env.sh, leaving
+# the checked-in func.yaml reusable for any FUNCTION_NAME.
+cp "$ROOT_DIR/Dockerfile" "$ROOT_DIR/func.py" "$ROOT_DIR/requirements.txt" "$DEPLOY_DIR/"
+awk -v function_name="$FUNCTION_NAME" '
+  /^name:[[:space:]]*/ { print "name: " function_name; next }
+  { print }
+' "$ROOT_DIR/func.yaml" > "$DEPLOY_DIR/func.yaml"
+
+cd "$DEPLOY_DIR"
 fn -v deploy --app "$APP_NAME"
 FUNCTION_ID=$("${OCI[@]}" fn function list --application-id "$APP_ID" --all \
   --query "data[?\"display-name\"=='$FUNCTION_NAME'].id | [0]" --raw-output)
 CONFIG_FILE=$(mktemp)
-trap 'rm -f "$CONFIG_FILE"' EXIT
 jq -n --arg host "$DB_HOST" --arg port "$DB_PORT" --arg name "$DB_NAME" --arg user "$DB_USER" --arg password "$DB_PASSWORD" \
   '{DB_HOST:$host,DB_PORT:$port,DB_NAME:$name,DB_USER:$user,DB_PASSWORD:$password}' > "$CONFIG_FILE"
 "${OCI[@]}" fn function update --function-id "$FUNCTION_ID" --config "file://$CONFIG_FILE" --force >/dev/null

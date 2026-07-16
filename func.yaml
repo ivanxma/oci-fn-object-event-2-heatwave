@@ -1,4 +1,6 @@
 schema_version: 20180708
+# deploy.sh substitutes this value in a temporary deployment copy using
+# FUNCTION_NAME from env.sh; do not use shell-variable syntax here.
 name: object-storage-heatwave
 version: 0.0.1
 runtime: python
