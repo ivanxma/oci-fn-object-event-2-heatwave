@@ -17,8 +17,8 @@ set -a
 . "$ENV_FILE"
 set +a
  : "${COMPARTMENT_ID:?Set COMPARTMENT_ID in env.sh}"
- : "${VCN_NAME:?Set VCN_NAME in env.sh}"
 SUBNET_ID="${SUBNET_ID:-}"
+SUBNET_NAME="${SUBNET_NAME:-}"
 : "${APP_NAME:?Set APP_NAME in env.sh}"
 : "${FUNCTION_NAME:?Set FUNCTION_NAME in env.sh}"
 : "${REGION:?Set REGION in env.sh}"
@@ -27,6 +27,7 @@ SUBNET_ID="${SUBNET_ID:-}"
 : "${DB_HOST:?Set DB_HOST in env.sh}"
 : "${DB_PORT:?Set DB_PORT in env.sh}"
 : "${DB_NAME:?Set DB_NAME in env.sh}"
+: "${DB_TABLE:?Set DB_TABLE in env.sh}"
 : "${DB_USER:?Set DB_USER in env.sh}"
 : "${DB_PASSWORD:?Set DB_PASSWORD in env.sh}"
 : "${OCIR_USERNAME:?Set OCIR_USERNAME in env.sh}"
@@ -37,10 +38,10 @@ cleanup() {
 }
 trap cleanup EXIT
 # Object Storage and the Events rule are deliberately confined to the same
-# HWDemo compartment as the Function application.
+# deployment compartment as the Function application.
 OBJECT_STORAGE_COMPARTMENT_ID="${OBJECT_STORAGE_COMPARTMENT_ID:-$COMPARTMENT_ID}"
 if [[ "$OBJECT_STORAGE_COMPARTMENT_ID" != "$COMPARTMENT_ID" ]]; then
-  echo "OBJECT_STORAGE_COMPARTMENT_ID must be the same HWDemo compartment as the Function application." >&2
+  echo "OBJECT_STORAGE_COMPARTMENT_ID must be the same compartment as the Function application." >&2
   exit 1
 fi
 
@@ -51,11 +52,13 @@ REPOSITORY_NAME="$REPOSITORY_PREFIX/$FUNCTION_NAME"
 
 VCN_ID="not queried (SUBNET_ID supplied)"
 if [[ -z "$SUBNET_ID" ]]; then
+  : "${VCN_NAME:?Set VCN_NAME in env.sh when SUBNET_ID is not supplied}"
+  : "${SUBNET_NAME:?Set SUBNET_NAME in env.sh when SUBNET_ID is not supplied}"
   if ! VCN_ID=$("${OCI[@]}" network vcn list --compartment-id "$COMPARTMENT_ID" --all \
     --query "data[?\"display-name\"=='$VCN_NAME'].id | [0]" --raw-output); then
     cat >&2 <<'EOF'
 Cannot list VCNs with the instance principal. Either grant it:
-  Allow dynamic-group <deployer-dynamic-group> to read virtual-network-family in compartment HWDemo
+  Allow dynamic-group <deployer-dynamic-group> to read virtual-network-family in compartment <deployment-compartment>
 or obtain the private subnet OCID from an OCI administrator and re-run with:
   export SUBNET_ID='private-subnet-ocid-from-console'
 EOF
@@ -63,8 +66,8 @@ EOF
   fi
   [[ -n "$VCN_ID" && "$VCN_ID" != "null" ]] || { echo "VCN not found: $VCN_NAME" >&2; exit 1; }
   SUBNET_ID=$("${OCI[@]}" network subnet list --compartment-id "$COMPARTMENT_ID" --vcn-id "$VCN_ID" --all \
-    --query 'data[?"prohibit-public-ip-on-vnic"==`true`].id | [0]' --raw-output)
-  [[ -n "$SUBNET_ID" && "$SUBNET_ID" != "null" ]] || { echo "No private subnet found in $VCN_NAME" >&2; exit 1; }
+    --query "data[?\"display-name\"=='$SUBNET_NAME' && \"prohibit-public-ip-on-vnic\"==\`true\`].id | [0]" --raw-output)
+  [[ -n "$SUBNET_ID" && "$SUBNET_ID" != "null" ]] || { echo "Private subnet not found: $SUBNET_NAME in $VCN_NAME" >&2; exit 1; }
 fi
 
 APP_ID=$("${OCI[@]}" fn application list --compartment-id "$COMPARTMENT_ID" --all \
@@ -75,10 +78,10 @@ if [[ -z "$APP_ID" || "$APP_ID" == "null" ]]; then
 fi
 
 # Repositories created implicitly on first image push are placed in the tenancy
-# root compartment. Create this private repository explicitly in HWDemo instead.
+# root compartment. Create this private repository explicitly in the deployment compartment instead.
 REPOSITORY_ID=$("${OCI[@]}" artifacts container repository list --compartment-id "$COMPARTMENT_ID" --all \
   --query "data.items[?\"display-name\"=='$REPOSITORY_NAME'].id | [0]" --raw-output) || {
-  echo "Cannot inspect OCIR repositories. Grant the instance dynamic group: manage repos in compartment HWDemo." >&2
+  echo "Cannot inspect OCIR repositories. Grant the instance dynamic group: manage repos in the deployment compartment." >&2
   exit 1
 }
 if [[ -z "$REPOSITORY_ID" || "$REPOSITORY_ID" == "null" ]]; then
@@ -111,13 +114,21 @@ fn -v deploy --app "$APP_NAME"
 FUNCTION_ID=$("${OCI[@]}" fn function list --application-id "$APP_ID" --all \
   --query "data[?\"display-name\"=='$FUNCTION_NAME'].id | [0]" --raw-output)
 CONFIG_FILE=$(mktemp)
-jq -n --arg host "$DB_HOST" --arg port "$DB_PORT" --arg name "$DB_NAME" --arg user "$DB_USER" --arg password "$DB_PASSWORD" \
-  '{DB_HOST:$host,DB_PORT:$port,DB_NAME:$name,DB_USER:$user,DB_PASSWORD:$password}' > "$CONFIG_FILE"
+jq -n --arg host "$DB_HOST" --arg port "$DB_PORT" --arg name "$DB_NAME" --arg table "$DB_TABLE" --arg user "$DB_USER" --arg password "$DB_PASSWORD" \
+  '{DB_HOST:$host,DB_PORT:$port,DB_NAME:$name,DB_TABLE:$table,DB_USER:$user,DB_PASSWORD:$password}' > "$CONFIG_FILE"
 "${OCI[@]}" fn function update --function-id "$FUNCTION_ID" --config "file://$CONFIG_FILE" --force >/dev/null
 
-RULE_NAME="${RULE_NAME:-object-storage-heatwave-events}"
-CONDITION=$(jq -nc --arg compartment "$OBJECT_STORAGE_COMPARTMENT_ID" '{eventType:["com.oraclecloud.objectstorage.createobject","com.oraclecloud.objectstorage.deleteobject","com.oraclecloud.objectstorage.updateobject"],data:{compartmentId:$compartment}}')
-ACTIONS=$(jq -nc --arg functionId "$FUNCTION_ID" '{actions:[{actionType:"FAAS",isEnabled:true,description:"Send Object Storage events to HeatWave function",functionId:$functionId}]}')
+RULE_NAME="${RULE_NAME:-${FUNCTION_NAME}-events}"
+RULE_DESCRIPTION="${RULE_DESCRIPTION:-Send Object Storage events to ${FUNCTION_NAME}}"
+EVENT_TYPES_JSON="${EVENT_TYPES_JSON:-[\"com.oraclecloud.objectstorage.createobject\",\"com.oraclecloud.objectstorage.deleteobject\",\"com.oraclecloud.objectstorage.updateobject\"]}"
+if ! jq -e 'type == "array" and all(.[]; type == "string")' >/dev/null <<<"$EVENT_TYPES_JSON"; then
+  echo "EVENT_TYPES_JSON must be a JSON array of event-type strings." >&2
+  exit 1
+fi
+CONDITION=$(jq -nc --arg compartment "$OBJECT_STORAGE_COMPARTMENT_ID" --arg bucket "${OBJECT_STORAGE_BUCKET_NAME:-}" --argjson event_types "$EVENT_TYPES_JSON" \
+  '{eventType:$event_types,data:{compartmentId:$compartment}} | if $bucket == "" then . else .data.additionalDetails={bucketName:$bucket} end')
+ACTIONS=$(jq -nc --arg functionId "$FUNCTION_ID" --arg description "$RULE_DESCRIPTION" \
+  '{actions:[{actionType:"FAAS",isEnabled:true,description:$description,functionId:$functionId}]}')
 RULE_ID=$("${OCI[@]}" events rule list --compartment-id "$COMPARTMENT_ID" --all --query "data[?\"display-name\"=='$RULE_NAME'].id | [0]" --raw-output)
 if [[ -z "$RULE_ID" || "$RULE_ID" == "null" ]]; then
   "${OCI[@]}" events rule create --compartment-id "$COMPARTMENT_ID" --display-name "$RULE_NAME" --condition "$CONDITION" --actions "$ACTIONS" --is-enabled true >/dev/null

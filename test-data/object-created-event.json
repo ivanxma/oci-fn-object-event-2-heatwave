@@ -4,10 +4,10 @@
   "eventTime": "2026-07-15T10:48:24Z",
   "data": {
     "compartmentId": "__COMPARTMENT_OCID__",
-    "resourceName": "myfolder/employees.csv",
+    "resourceName": "example/object.csv",
     "additionalDetails": {
-      "bucketName": "ivanma-bucket",
-      "objectName": "myfolder/employees.csv"
+      "bucketName": "example-bucket",
+      "objectName": "example/object.csv"
     }
   }
 }

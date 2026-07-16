@@ -1,7 +1,7 @@
 schema_version: 20180708
-# deploy.sh substitutes this value in a temporary deployment copy using
-# FUNCTION_NAME from env.sh; do not use shell-variable syntax here.
-name: object-storage-heatwave
+# deploy.sh substitutes this placeholder in a temporary deployment copy using
+# FUNCTION_NAME from env.sh; Fn does not expand shell-variable syntax here.
+name: function-name-set-by-deploy
 version: 0.0.1
 runtime: python
 entrypoint: /python/bin/fdk /function/func.py handler
