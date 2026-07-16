@@ -1,6 +1,6 @@
 # Object Storage → HeatWave OCI Function
 
-This package deploys a Python 3.13 OCI Function into `HWDemo`, with a private subnet selected from `vcn_ivanma_london`. An Events rule forwards Object Storage create, delete, and update events to the function. The function creates `fndb.object_event` if it does not already exist, then writes each received event's timestamp, type, and full JSON message. The host bootstrap uses the Oracle Linux `python3` package only for tooling; Python 3.13 is supplied by the function container image.
+This package deploys a Python 3.13 OCI Function into `HWDemo`, with a private subnet selected from `vcn_ivanma_london`. An Events rule forwards Object Storage create, delete, and update events to the function. The function creates `fndb.object_event` if it does not already exist, then writes each received event's timestamp, type, full JSON message, and extracted `bucket_name`, `compartment_name`, `resource_name`, `namespace`, and `event_time` columns. The host bootstrap uses the Oracle Linux `python3` package only for tooling; Python 3.13 is supplied by the function container image.
 
 ## One-time prerequisites
 

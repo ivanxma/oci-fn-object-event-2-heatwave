@@ -23,7 +23,7 @@ def _event_summary(event: dict[str, Any]) -> dict[str, Any]:
     data = event.get("data", {})
     return {
         "eventType": event.get("eventType"),
-        "eventId": event.get("id"),
+        "eventId": event.get("eventID") or event.get("id"),
         "compartmentId": data.get("compartmentId"),
         "resourceName": data.get("resourceName"),
         "bucketName": details.get("bucketName"),
@@ -35,9 +35,22 @@ CREATE_EVENT_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS fndb.object_event (
     event_date DATETIME(6) NOT NULL,
     event_type VARCHAR(255) NOT NULL,
-    event_message JSON NOT NULL
+    event_message JSON NOT NULL,
+    bucket_name VARCHAR(255) NULL,
+    compartment_name VARCHAR(255) NULL,
+    resource_name TEXT NULL,
+    namespace VARCHAR(255) NULL,
+    event_time DATETIME(6) NULL
 )
 """
+
+EVENT_COLUMNS = {
+    "bucket_name": "VARCHAR(255) NULL",
+    "compartment_name": "VARCHAR(255) NULL",
+    "resource_name": "TEXT NULL",
+    "namespace": "VARCHAR(255) NULL",
+    "event_time": "DATETIME(6) NULL",
+}
 
 
 def _event_date(event: dict[str, Any]) -> datetime:
@@ -49,6 +62,29 @@ def _event_date(event: dict[str, Any]) -> datetime:
         except ValueError:
             pass
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _ensure_event_columns(cursor: Any) -> None:
+    """Add extracted-event columns when upgrading an existing table."""
+    for name, definition in EVENT_COLUMNS.items():
+        cursor.execute(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema = 'fndb' AND table_name = 'object_event' AND column_name = %s",
+            (name,),
+        )
+        if cursor.fetchone() is None:
+            cursor.execute(f"ALTER TABLE fndb.object_event ADD COLUMN `{name}` {definition}")
+
+
+def _event_fields(event: dict[str, Any]) -> tuple[str | None, str | None, str | None, str | None]:
+    data = event.get("data", {})
+    details = data.get("additionalDetails", {})
+    return (
+        details.get("bucketName"),
+        data.get("compartmentName"),
+        data.get("resourceName"),
+        details.get("namespace") or data.get("namespace"),
+    )
 
 
 def handler(ctx: Any, data: io.BytesIO | None = None) -> response.Response:
@@ -69,9 +105,23 @@ def handler(ctx: Any, data: io.BytesIO | None = None) -> response.Response:
         try:
             with connection.cursor() as cursor:
                 cursor.execute(CREATE_EVENT_TABLE_SQL)
+                _ensure_event_columns(cursor)
+                bucket_name, compartment_name, resource_name, namespace = _event_fields(event)
+                event_time = _event_date(event)
                 cursor.execute(
-                    "INSERT INTO fndb.object_event (event_date, event_type, event_message) VALUES (%s, %s, %s)",
-                    (_event_date(event), str(event.get("eventType", "unknown")), json.dumps(event, separators=(",", ":"))),
+                    "INSERT INTO fndb.object_event "
+                    "(event_date, event_type, event_message, bucket_name, compartment_name, resource_name, namespace, event_time) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                    (
+                        event_time,
+                        str(event.get("eventType", "unknown")),
+                        json.dumps(event, separators=(",", ":")),
+                        bucket_name,
+                        compartment_name,
+                        resource_name,
+                        namespace,
+                        event_time,
+                    ),
                 )
             connection.commit()
         finally:
