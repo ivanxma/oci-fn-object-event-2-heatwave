@@ -52,7 +52,6 @@ the compartment-only scope shown above.
 cd ~/oci-fn
 ./bootstrap.sh
 cp env.sh.example env.sh
-chmod 600 env.sh
 # Edit env.sh locally with DB and OCIR deployment values.
 ./deploy.sh
 ```
