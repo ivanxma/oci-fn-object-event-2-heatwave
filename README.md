@@ -28,6 +28,21 @@ the script refuses a cross-compartment source.
 
 `deploy.sh` writes `function-report.html`. Open it locally or copy it off the host; it contains resource identifiers and no secrets.
 
+## Show recent function logs
+
+Enable **Function Invocation Logs** for the application first. Then, from the
+deployment host, show the last 15 minutes of logs (or supply a different number
+of minutes and an optional result limit):
+
+```sh
+./showlog.sh 15
+./showlog.sh 60 250
+```
+
+The script searches only the configured application and function in the
+`COMPARTMENT_ID` from `env.sh`. It uses the instance principal by default; set
+`OCI_AUTH` only when another OCI CLI authentication method is required.
+
 ## Test
 
 Create, overwrite, then delete a small object in an Object Storage bucket in `OBJECT_STORAGE_COMPARTMENT_ID`. Inspect function invocations in OCI Console Metrics/Logs, or invoke it directly after deployment:
