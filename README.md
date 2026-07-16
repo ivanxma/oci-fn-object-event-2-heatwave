@@ -90,7 +90,9 @@ The script searches only the configured application and function in the
 `COMPARTMENT_ID` from `env.sh`. Set `FUNCTION_LOG_GROUP_ID` and
 `FUNCTION_LOG_ID` from the enabled Function Invocation Log's details page in
 the same compartment. It uses the instance principal by default; set `OCI_AUTH`
-only when another OCI CLI authentication method is required.
+only when another OCI CLI authentication method is required. Results are grouped
+by invocation request ID, with received/completion lifecycle messages and any
+function output shown on the same table row.
 
 ## Test
 
