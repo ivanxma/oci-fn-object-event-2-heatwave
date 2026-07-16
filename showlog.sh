@@ -28,6 +28,8 @@ fi
 : "${COMPARTMENT_ID:?Set COMPARTMENT_ID in env.sh}"
 : "${APP_NAME:?Set APP_NAME in env.sh}"
 : "${FUNCTION_NAME:?Set FUNCTION_NAME in env.sh}"
+: "${FUNCTION_LOG_GROUP_ID:?Set FUNCTION_LOG_GROUP_ID in env.sh after enabling Function Invocation Logs}"
+: "${FUNCTION_LOG_ID:?Set FUNCTION_LOG_ID in env.sh after enabling Function Invocation Logs}"
 if ! [[ "$APP_NAME" =~ ^[A-Za-z0-9._-]+$ && "$FUNCTION_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
   echo "APP_NAME and FUNCTION_NAME may contain only letters, digits, dot, underscore, and hyphen." >&2
   exit 2
@@ -40,9 +42,9 @@ OCI_AUTH="${OCI_AUTH:-instance_principal}"
 START_TIME=$(date -u -d "${MINUTES} minutes ago" +'%Y-%m-%dT%H:%M:%SZ')
 END_TIME=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
 
-# Function invocation logs identify the application as source and the function as subject.
-# This is intentionally scoped to HWDemo through COMPARTMENT_ID.
-SEARCH_QUERY="search \"${COMPARTMENT_ID}\" | source='${APP_NAME}' and subject='${FUNCTION_NAME}' | sort by datetime desc"
+# Query the single invocation log. This avoids a broad compartment search, which
+# can otherwise include Audit logs and require unrelated Audit permissions.
+SEARCH_QUERY="search \"${COMPARTMENT_ID}/${FUNCTION_LOG_GROUP_ID}/${FUNCTION_LOG_ID}\" | source='${APP_NAME}' and subject='${FUNCTION_NAME}' | sort by datetime desc"
 
 echo "Showing up to $LIMIT invocation log entries from $START_TIME through $END_TIME (UTC)." >&2
 "$OCI_BIN" --auth "$OCI_AUTH" logging-search search-logs \

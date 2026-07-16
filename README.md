@@ -40,8 +40,10 @@ of minutes and an optional result limit):
 ```
 
 The script searches only the configured application and function in the
-`COMPARTMENT_ID` from `env.sh`. It uses the instance principal by default; set
-`OCI_AUTH` only when another OCI CLI authentication method is required.
+`COMPARTMENT_ID` from `env.sh`. Set `FUNCTION_LOG_GROUP_ID` and
+`FUNCTION_LOG_ID` from the enabled Function Invocation Log's details page. It
+uses the instance principal by default; set `OCI_AUTH` only when another OCI
+CLI authentication method is required.
 
 ## Test
 
