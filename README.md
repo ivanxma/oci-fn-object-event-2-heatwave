@@ -1,6 +1,6 @@
 # Object Storage → HeatWave OCI Function
 
-This package deploys a Python 3.13 OCI Function into the compartment and private subnet selected in `env.sh`. An Events rule forwards Object Storage create, delete, and update events to the function. The function creates `fndb.object_event` if it does not already exist, then writes each received event's timestamp, type, full JSON message, and extracted `bucket_name`, `compartment_name`, `resource_name`, `namespace`, and `event_time` columns. The host bootstrap uses the Oracle Linux `python3` package only for tooling; Python 3.13 is supplied by the function container image.
+This package deploys a Python 3.13 OCI Function into the compartment and private subnet selected in `env.sh`. An Events rule forwards Object Storage create, delete, and update events to the function. The function creates `object_event` in the MySQL schema configured by `DB_NAME` if it does not already exist, then writes each received event's timestamp, type, full JSON message, and extracted `bucket_name`, `compartment_name`, `resource_name`, `namespace`, and `event_time` columns. The host bootstrap uses the Oracle Linux `python3` package only for tooling; Python 3.13 is supplied by the function container image.
 
 ## One-time prerequisites
 
@@ -89,4 +89,4 @@ Create, overwrite, then delete a small object in an Object Storage bucket in `OB
 echo '{"eventType":"com.oraclecloud.objectstorage.createobject","data":{"additionalDetails":{"bucketName":"test","objectName":"test.txt"}}}' | fn invoke object-storage-heatwave-app object-storage-heatwave
 ```
 
-The expected response has `"status":"accepted"` and `"database":"event stored"`. The configured DB user needs `CREATE` and `INSERT` privileges on `fndb`.
+The expected response has `"status":"accepted"` and `"database":"event stored"`. Set `DB_NAME` in `env.sh` to the target MySQL schema (letters, digits, and underscores only; maximum 64 characters). The configured DB user needs `CREATE`, `ALTER`, and `INSERT` privileges on that schema.

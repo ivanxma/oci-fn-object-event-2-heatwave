@@ -25,6 +25,7 @@ SUBNET_ID="${SUBNET_ID:-}"
 : "${REPOSITORY_PREFIX:?Set REPOSITORY_PREFIX in env.sh}"
 : "${DB_HOST:?Set DB_HOST in env.sh}"
 : "${DB_PORT:?Set DB_PORT in env.sh}"
+: "${DB_NAME:?Set DB_NAME in env.sh}"
 : "${DB_USER:?Set DB_USER in env.sh}"
 : "${DB_PASSWORD:?Set DB_PASSWORD in env.sh}"
 : "${OCIR_USERNAME:?Set OCIR_USERNAME in env.sh}"
@@ -96,8 +97,8 @@ FUNCTION_ID=$("${OCI[@]}" fn function list --application-id "$APP_ID" --all \
   --query "data[?\"display-name\"=='$FUNCTION_NAME'].id | [0]" --raw-output)
 CONFIG_FILE=$(mktemp)
 trap 'rm -f "$CONFIG_FILE"' EXIT
-jq -n --arg host "$DB_HOST" --arg port "$DB_PORT" --arg user "$DB_USER" --arg password "$DB_PASSWORD" \
-  '{DB_HOST:$host,DB_PORT:$port,DB_USER:$user,DB_PASSWORD:$password}' > "$CONFIG_FILE"
+jq -n --arg host "$DB_HOST" --arg port "$DB_PORT" --arg name "$DB_NAME" --arg user "$DB_USER" --arg password "$DB_PASSWORD" \
+  '{DB_HOST:$host,DB_PORT:$port,DB_NAME:$name,DB_USER:$user,DB_PASSWORD:$password}' > "$CONFIG_FILE"
 "${OCI[@]}" fn function update --function-id "$FUNCTION_ID" --config "file://$CONFIG_FILE" --force >/dev/null
 
 RULE_NAME="${RULE_NAME:-object-storage-heatwave-events}"

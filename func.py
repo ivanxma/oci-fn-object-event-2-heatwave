@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -31,8 +32,30 @@ def _event_summary(event: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-CREATE_EVENT_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS fndb.object_event (
+EVENT_COLUMNS = {
+    "bucket_name": "VARCHAR(255) NULL",
+    "compartment_name": "VARCHAR(255) NULL",
+    "resource_name": "TEXT NULL",
+    "namespace": "VARCHAR(255) NULL",
+    "event_time": "DATETIME(6) NULL",
+}
+
+
+def _database_name() -> str:
+    """Return a safe MySQL schema identifier from the Function configuration."""
+    name = _setting("DB_NAME")
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_]{1,64}", name):
+        raise ValueError("DB_NAME must contain 1-64 letters, digits, or underscores")
+    return name
+
+
+def _event_table(database_name: str) -> str:
+    return f"`{database_name}`.`object_event`"
+
+
+def _create_event_table_sql(database_name: str) -> str:
+    return f"""
+CREATE TABLE IF NOT EXISTS {_event_table(database_name)} (
     event_date DATETIME(6) NOT NULL,
     event_type VARCHAR(255) NOT NULL,
     event_message JSON NOT NULL,
@@ -43,14 +66,6 @@ CREATE TABLE IF NOT EXISTS fndb.object_event (
     event_time DATETIME(6) NULL
 )
 """
-
-EVENT_COLUMNS = {
-    "bucket_name": "VARCHAR(255) NULL",
-    "compartment_name": "VARCHAR(255) NULL",
-    "resource_name": "TEXT NULL",
-    "namespace": "VARCHAR(255) NULL",
-    "event_time": "DATETIME(6) NULL",
-}
 
 
 def _event_date(event: dict[str, Any]) -> datetime:
@@ -64,16 +79,16 @@ def _event_date(event: dict[str, Any]) -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def _ensure_event_columns(cursor: Any) -> None:
+def _ensure_event_columns(cursor: Any, database_name: str) -> None:
     """Add extracted-event columns when upgrading an existing table."""
     for name, definition in EVENT_COLUMNS.items():
         cursor.execute(
             "SELECT 1 FROM information_schema.columns "
-            "WHERE table_schema = 'fndb' AND table_name = 'object_event' AND column_name = %s",
-            (name,),
+            "WHERE table_schema = %s AND table_name = 'object_event' AND column_name = %s",
+            (database_name, name),
         )
         if cursor.fetchone() is None:
-            cursor.execute(f"ALTER TABLE fndb.object_event ADD COLUMN `{name}` {definition}")
+            cursor.execute(f"ALTER TABLE {_event_table(database_name)} ADD COLUMN `{name}` {definition}")
 
 
 def _event_fields(event: dict[str, Any]) -> tuple[str | None, str | None, str | None, str | None]:
@@ -94,6 +109,8 @@ def handler(ctx: Any, data: io.BytesIO | None = None) -> response.Response:
         if not isinstance(event, dict):
             raise ValueError("Expected a JSON Object Storage event object")
 
+        database_name = _database_name()
+
         connection = mysql.connector.connect(
             host=_setting("DB_HOST"),
             port=int(_setting("DB_PORT", default="3306") or "3306"),
@@ -104,12 +121,12 @@ def handler(ctx: Any, data: io.BytesIO | None = None) -> response.Response:
         )
         try:
             with connection.cursor() as cursor:
-                cursor.execute(CREATE_EVENT_TABLE_SQL)
-                _ensure_event_columns(cursor)
+                cursor.execute(_create_event_table_sql(database_name))
+                _ensure_event_columns(cursor, database_name)
                 bucket_name, compartment_name, resource_name, namespace = _event_fields(event)
                 event_time = _event_date(event)
                 cursor.execute(
-                    "INSERT INTO fndb.object_event "
+                    f"INSERT INTO {_event_table(database_name)} "
                     "(event_date, event_type, event_message, bucket_name, compartment_name, resource_name, namespace, event_time) "
                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
                     (
